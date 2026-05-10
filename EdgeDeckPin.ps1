@@ -17,102 +17,6 @@ $ErrorActionPreference = "Stop"
 
 Add-Type -AssemblyName System.Windows.Forms
 
-function Get-EdgeDeckIntersectionArea {
-    param(
-        [Parameter(Mandatory = $true)] $A,
-        [Parameter(Mandatory = $true)] $B
-    )
-
-    $left = [Math]::Max([int]$A.X, [int]$B.X)
-    $top = [Math]::Max([int]$A.Y, [int]$B.Y)
-    $right = [Math]::Min([int]$A.X + [int]$A.Width, [int]$B.X + [int]$B.Width)
-    $bottom = [Math]::Min([int]$A.Y + [int]$A.Height, [int]$B.Y + [int]$B.Height)
-    $width = $right - $left
-    $height = $bottom - $top
-
-    if ($width -le 0 -or $height -le 0) {
-        return [int64]0
-    }
-
-    return [int64]$width * [int64]$height
-}
-
-function Select-EdgeDeckTargetScreen {
-    param(
-        [Parameter(Mandatory = $true)] [object[]] $Screens,
-        [int] $PreferredWidth = 2560,
-        [int] $PreferredHeight = 720
-    )
-
-    if ($Screens.Count -eq 0) {
-        return $null
-    }
-
-    $exactNonPrimary = $Screens |
-        Where-Object { -not $_.Primary -and $_.Bounds.Width -eq $PreferredWidth -and $_.Bounds.Height -eq $PreferredHeight } |
-        Select-Object -First 1
-
-    if ($null -ne $exactNonPrimary) {
-        return $exactNonPrimary
-    }
-
-    $exactAny = $Screens |
-        Where-Object { $_.Bounds.Width -eq $PreferredWidth -and $_.Bounds.Height -eq $PreferredHeight } |
-        Select-Object -First 1
-
-    if ($null -ne $exactAny) {
-        return $exactAny
-    }
-
-    $nonPrimary = $Screens |
-        Where-Object { -not $_.Primary } |
-        Select-Object -First 1
-
-    if ($null -ne $nonPrimary) {
-        return $nonPrimary
-    }
-
-    return $Screens | Select-Object -First 1
-}
-
-function Select-EdgeDeckWindowCandidate {
-    param(
-        [Parameter(Mandatory = $true)] [object[]] $Windows,
-        [Parameter(Mandatory = $true)] $TargetScreen,
-        [string] $ProcessName = "StreamDeck"
-    )
-
-    $scored = foreach ($window in $Windows) {
-        if ($null -eq $window -or -not $window.Visible) {
-            continue
-        }
-
-        if ($window.ProcessName -ne $ProcessName) {
-            continue
-        }
-
-        $intersection = Get-EdgeDeckIntersectionArea -A $window.Rect -B $TargetScreen.Bounds
-        if ($intersection -le 0) {
-            continue
-        }
-
-        $titleScore = if ([string]$window.Title -match "Virtual\s+Stream\s+Deck|VSD") { 1000000000000 } else { 0 }
-        $classScore = if ([string]$window.ClassName -match "Qt|Chrome|CEF|Window") { 1000000 } else { 0 }
-
-        [pscustomobject]@{
-            Window = $window
-            Score = [int64]$titleScore + [int64]$classScore + [int64]$intersection
-        }
-    }
-
-    $best = $scored | Sort-Object Score -Descending | Select-Object -First 1
-    if ($null -eq $best) {
-        return $null
-    }
-
-    return $best.Window
-}
-
 $win32Source = @'
 using System;
 using System.Text;
@@ -139,6 +43,9 @@ public static class EdgeDeckPinWin32 {
     public static extern bool IsWindowVisible(IntPtr hWnd);
 
     [DllImport("user32.dll", SetLastError = true)]
+    public static extern bool ShowWindow(IntPtr hWnd, int nCmdShow);
+
+    [DllImport("user32.dll", SetLastError = true)]
     public static extern bool GetWindowRect(IntPtr hWnd, out RECT lpRect);
 
     [DllImport("user32.dll", SetLastError = true)]
@@ -154,6 +61,9 @@ public static class EdgeDeckPinWin32 {
     public static extern IntPtr GetWindowLongPtr(IntPtr hWnd, int nIndex);
 
     [DllImport("user32.dll", SetLastError = true)]
+    public static extern IntPtr SetWindowLongPtr(IntPtr hWnd, int nIndex, IntPtr dwNewLong);
+
+    [DllImport("user32.dll", SetLastError = true)]
     public static extern bool SetWindowPos(IntPtr hWnd, IntPtr hWndInsertAfter, int X, int Y, int cx, int cy, uint uFlags);
 }
 '@
@@ -161,6 +71,17 @@ public static class EdgeDeckPinWin32 {
 if (-not ("EdgeDeckPinWin32" -as [type])) {
     Add-Type -TypeDefinition $win32Source
 }
+
+$GWLP_HWNDPARENT = -8
+$GWL_EXSTYLE = -20
+$HWND_TOPMOST = [IntPtr](-1)
+$HWND_NOTOPMOST = [IntPtr](-2)
+$SW_SHOWNA = 8
+$SWP_NOSIZE = 0x0001
+$SWP_NOMOVE = 0x0002
+$SWP_NOACTIVATE = 0x0010
+$SWP_SHOWWINDOW = 0x0040
+$WS_EX_TOPMOST = 0x00000008
 
 function ConvertTo-EdgeDeckRectObject {
     param([EdgeDeckPinWin32+RECT] $Rect)
@@ -176,6 +97,23 @@ function ConvertTo-EdgeDeckRectObject {
 function Format-EdgeDeckRect {
     param($Rect)
     return "X=$($Rect.X),Y=$($Rect.Y),W=$($Rect.Width),H=$($Rect.Height)"
+}
+
+function Get-EdgeDeckIntersectionArea {
+    param($A, $B)
+
+    $left = [Math]::Max([int]$A.X, [int]$B.X)
+    $top = [Math]::Max([int]$A.Y, [int]$B.Y)
+    $right = [Math]::Min([int]$A.X + [int]$A.Width, [int]$B.X + [int]$B.Width)
+    $bottom = [Math]::Min([int]$A.Y + [int]$A.Height, [int]$B.Y + [int]$B.Height)
+    $width = $right - $left
+    $height = $bottom - $top
+
+    if ($width -le 0 -or $height -le 0) {
+        return [int64]0
+    }
+
+    return [int64]$width * [int64]$height
 }
 
 function Get-EdgeDeckScreens {
@@ -212,6 +150,33 @@ function Get-EdgeDeckVirtualDesktopScreen {
     }
 }
 
+function Select-EdgeDeckTargetScreen {
+    param([object[]] $Screens)
+
+    $exactNonPrimary = $Screens |
+        Where-Object { -not $_.Primary -and $_.Bounds.Width -eq $PreferredDisplayWidth -and $_.Bounds.Height -eq $PreferredDisplayHeight } |
+        Select-Object -First 1
+
+    if ($null -ne $exactNonPrimary) {
+        return $exactNonPrimary
+    }
+
+    $exactAny = $Screens |
+        Where-Object { $_.Bounds.Width -eq $PreferredDisplayWidth -and $_.Bounds.Height -eq $PreferredDisplayHeight } |
+        Select-Object -First 1
+
+    if ($null -ne $exactAny) {
+        return $exactAny
+    }
+
+    $nonPrimary = $Screens | Where-Object { -not $_.Primary } | Select-Object -First 1
+    if ($null -ne $nonPrimary) {
+        return $nonPrimary
+    }
+
+    return $Screens | Select-Object -First 1
+}
+
 function Get-EdgeDeckWindowText {
     param([IntPtr] $Hwnd)
 
@@ -245,7 +210,8 @@ function New-EdgeDeckWindowRecord {
         return $null
     }
 
-    $exStyle = [EdgeDeckPinWin32]::GetWindowLongPtr($Hwnd, -20).ToInt64()
+    $exStyle = [EdgeDeckPinWin32]::GetWindowLongPtr($Hwnd, $GWL_EXSTYLE).ToInt64()
+    $owner = [EdgeDeckPinWin32]::GetWindowLongPtr($Hwnd, $GWLP_HWNDPARENT).ToInt64()
 
     [pscustomobject]@{
         Hwnd = ("0x{0:X}" -f $Hwnd.ToInt64())
@@ -254,7 +220,9 @@ function New-EdgeDeckWindowRecord {
         ProcessId = $processIdValue
         ThreadId = $threadId
         Visible = [EdgeDeckPinWin32]::IsWindowVisible($Hwnd)
-        Topmost = (($exStyle -band 0x00000008) -ne 0)
+        Topmost = (($exStyle -band $WS_EX_TOPMOST) -ne 0)
+        OwnerHwndInt64 = $owner
+        OwnerHwnd = ("0x{0:X}" -f $owner)
         ClassName = Get-EdgeDeckWindowClass -Hwnd $Hwnd
         Title = Get-EdgeDeckWindowText -Hwnd $Hwnd
         Rect = ConvertTo-EdgeDeckRectObject -Rect $rect
@@ -298,17 +266,90 @@ function Get-EdgeDeckWindows {
     return $recordsByHwnd.Values
 }
 
-function Set-EdgeDeckWindowTopmost {
+function Select-EdgeDeckIcueWindow {
+    param([object[]] $Windows, $TargetScreen)
+
+    $scored = foreach ($window in $Windows) {
+        if ($window.ProcessName -ne "iCUE" -or -not $window.Visible) {
+            continue
+        }
+
+        $intersection = Get-EdgeDeckIntersectionArea -A $window.Rect -B $TargetScreen.Bounds
+        if ($intersection -le 0) {
+            continue
+        }
+
+        $classScore = if ([string]$window.ClassName -match "ToolSaveBits|QWindow") { 1000000 } else { 0 }
+        $topmostScore = if ($window.Topmost) { 100000 } else { 0 }
+
+        [pscustomobject]@{
+            Window = $window
+            Score = [int64]$intersection + [int64]$classScore + [int64]$topmostScore
+        }
+    }
+
+    $best = $scored | Sort-Object Score -Descending | Select-Object -First 1
+    if ($null -eq $best) {
+        return $null
+    }
+
+    return $best.Window
+}
+
+function Select-EdgeDeckStreamDeckWindow {
+    param([object[]] $Windows, $SearchScreen)
+
+    $scored = foreach ($window in $Windows) {
+        if ($window.ProcessName -ne "StreamDeck") {
+            continue
+        }
+
+        $intersection = Get-EdgeDeckIntersectionArea -A $window.Rect -B $SearchScreen.Bounds
+        if ($intersection -le 0) {
+            continue
+        }
+
+        $visibleScore = if ($window.Visible) { 10000000 } else { 0 }
+        $titleScore = if ([string]$window.Title -match "Virtual\s+Stream\s+Deck|VSD|Stream Deck") { 1000000 } else { 0 }
+        $classScore = if ([string]$window.ClassName -match "ToolSaveBits|QWindow") { 100000 } else { 0 }
+
+        [pscustomobject]@{
+            Window = $window
+            Score = [int64]$visibleScore + [int64]$titleScore + [int64]$classScore + [int64]$intersection
+        }
+    }
+
+    $best = $scored | Sort-Object Score -Descending | Select-Object -First 1
+    if ($null -eq $best) {
+        return $null
+    }
+
+    return $best.Window
+}
+
+function Set-EdgeDeckOwner {
     param(
-        [Parameter(Mandatory = $true)] [Int64] $HwndInt64,
-        [Parameter(Mandatory = $true)] [bool] $Topmost
+        [Int64] $VsdHwndInt64,
+        [Int64] $OwnerHwndInt64
     )
 
-    $hwnd = [IntPtr]$HwndInt64
-    $insertAfter = if ($Topmost) { [IntPtr](-1) } else { [IntPtr](-2) }
-    $flags = [uint32](0x0001 -bor 0x0002 -bor 0x0010)
+    [EdgeDeckPinWin32]::SetWindowLongPtr([IntPtr]$VsdHwndInt64, $GWLP_HWNDPARENT, [IntPtr]$OwnerHwndInt64) | Out-Null
+}
 
-    if (-not [EdgeDeckPinWin32]::SetWindowPos($hwnd, $insertAfter, 0, 0, 0, 0, $flags)) {
+function Set-EdgeDeckTopmost {
+    param(
+        [Int64] $HwndInt64,
+        [bool] $Topmost,
+        [bool] $Show
+    )
+
+    $insertAfter = if ($Topmost) { $HWND_TOPMOST } else { $HWND_NOTOPMOST }
+    $flags = $SWP_NOMOVE -bor $SWP_NOSIZE -bor $SWP_NOACTIVATE
+    if ($Show) {
+        $flags = $flags -bor $SWP_SHOWWINDOW
+    }
+
+    if (-not [EdgeDeckPinWin32]::SetWindowPos([IntPtr]$HwndInt64, $insertAfter, 0, 0, 0, 0, [uint32]$flags)) {
         $errorCode = [Runtime.InteropServices.Marshal]::GetLastWin32Error()
         throw "SetWindowPos failed for hwnd $HwndInt64 with Win32 error $errorCode"
     }
@@ -323,7 +364,7 @@ function Invoke-EdgeDeckPinOnce {
     if ($TargetDisplayName) {
         $targetScreen = $screens | Where-Object { $_.DeviceName -eq $TargetDisplayName } | Select-Object -First 1
     } else {
-        $targetScreen = Select-EdgeDeckTargetScreen -Screens $screens -PreferredWidth $PreferredDisplayWidth -PreferredHeight $PreferredDisplayHeight
+        $targetScreen = Select-EdgeDeckTargetScreen -Screens $screens
     }
 
     if ($null -eq $targetScreen) {
@@ -337,25 +378,47 @@ function Invoke-EdgeDeckPinOnce {
         $windows |
             Sort-Object ProcessName, Title, Hwnd |
             ForEach-Object {
-                Write-Host ("{0} process={1} pid={2} visible={3} topmost={4} class='{5}' title='{6}' rect={7}" -f `
-                    $_.Hwnd, $_.ProcessName, $_.ProcessId, $_.Visible, $_.Topmost, $_.ClassName, $_.Title, (Format-EdgeDeckRect $_.Rect))
+                Write-Host ("{0} process={1} pid={2} visible={3} topmost={4} owner={5} class='{6}' title='{7}' rect={8}" -f `
+                    $_.Hwnd, $_.ProcessName, $_.ProcessId, $_.Visible, $_.Topmost, $_.OwnerHwnd, $_.ClassName, $_.Title, (Format-EdgeDeckRect $_.Rect))
             }
         return
     }
 
+    $icueWindow = Select-EdgeDeckIcueWindow -Windows $windows -TargetScreen $targetScreen
     $searchScreen = if ($AnyDisplay) { Get-EdgeDeckVirtualDesktopScreen -Screens $screens } else { $targetScreen }
-    $candidate = Select-EdgeDeckWindowCandidate -Windows $windows -TargetScreen $searchScreen
+    $vsdWindow = Select-EdgeDeckStreamDeckWindow -Windows $windows -SearchScreen $searchScreen
 
-    if ($null -eq $candidate) {
+    if ($null -eq $vsdWindow) {
         if (-not $Quiet) {
-            Write-Warning "No visible Virtual Stream Deck candidate found on $($searchScreen.DeviceName)."
+            Write-Warning "No Stream Deck window found on $($searchScreen.DeviceName)."
         }
         return
     }
 
-    $topmost = -not $ClearTopmost
-    $mode = if ($topmost) { "topmost" } else { "not-topmost" }
-    $message = "$mode -> $($candidate.Hwnd) $($candidate.ProcessName) '$($candidate.Title)' $(Format-EdgeDeckRect $candidate.Rect)"
+    if ($ClearTopmost) {
+        if (-not $DryRun) {
+            Set-EdgeDeckOwner -VsdHwndInt64 $vsdWindow.HwndInt64 -OwnerHwndInt64 0
+            [EdgeDeckPinWin32]::ShowWindow([IntPtr]$vsdWindow.HwndInt64, $SW_SHOWNA) | Out-Null
+            Set-EdgeDeckTopmost -HwndInt64 $vsdWindow.HwndInt64 -Topmost $false -Show $true
+        }
+
+        if (-not $Quiet) {
+            Write-Host "cleared -> $($vsdWindow.Hwnd) '$($vsdWindow.Title)'"
+        }
+        return
+    }
+
+    $ownerChanged = $false
+    if ($null -ne $icueWindow -and $vsdWindow.OwnerHwndInt64 -ne $icueWindow.HwndInt64) {
+        $ownerChanged = $true
+    }
+
+    $needsShow = -not $vsdWindow.Visible
+    $needsTopmost = -not $vsdWindow.Topmost
+    $needsWork = $ownerChanged -or $needsShow -or $needsTopmost
+
+    $ownerText = if ($null -ne $icueWindow) { $icueWindow.Hwnd } else { "none" }
+    $message = "sync -> vsd=$($vsdWindow.Hwnd) owner=$ownerText ownerChanged=$ownerChanged needsShow=$needsShow needsTopmost=$needsTopmost"
 
     if ($DryRun) {
         if (-not $Quiet) {
@@ -364,7 +427,18 @@ function Invoke-EdgeDeckPinOnce {
         return
     }
 
-    Set-EdgeDeckWindowTopmost -HwndInt64 $candidate.HwndInt64 -Topmost $topmost
+    if ($ownerChanged) {
+        Set-EdgeDeckOwner -VsdHwndInt64 $vsdWindow.HwndInt64 -OwnerHwndInt64 $icueWindow.HwndInt64
+    }
+
+    if ($needsShow) {
+        [EdgeDeckPinWin32]::ShowWindow([IntPtr]$vsdWindow.HwndInt64, $SW_SHOWNA) | Out-Null
+    }
+
+    if ($needsWork) {
+        Set-EdgeDeckTopmost -HwndInt64 $vsdWindow.HwndInt64 -Topmost $true -Show $true
+    }
+
     if (-not $Quiet) {
         Write-Host $message
     }

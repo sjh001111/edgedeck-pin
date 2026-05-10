@@ -3,15 +3,16 @@
 Pin Elgato Virtual Stream Deck above Corsair iCUE on XENEON EDGE.
 
 EdgeDeck Pin is a tiny Windows helper for people who use Virtual Stream Deck on
-a Corsair XENEON EDGE screen. It watches for the Stream Deck window on the
-XENEON EDGE display and marks that window as topmost so iCUE widgets cannot
-hide it when you tap around the screen.
+a Corsair XENEON EDGE screen. It watches the XENEON EDGE dashboard window in
+iCUE, makes the Virtual Stream Deck window owned by that dashboard window, and
+only corrects visibility/topmost state when needed.
 
 ## What it does
 
 - Automatically detects the XENEON EDGE-style display by its 2560x720 resolution.
-- Automatically detects the visible Stream Deck window on that display.
-- Re-applies topmost state on an interval, so Stream Deck/iCUE restarts are handled.
+- Automatically detects the Stream Deck window on that display.
+- Syncs the Stream Deck window owner to the current iCUE XENEON EDGE window.
+- Repairs visibility/topmost state only when the owner or window state changes.
 - Installs as a per-user login startup entry.
 - Uninstalls cleanly.
 - Does not patch iCUE, Stream Deck, or device firmware.
@@ -63,8 +64,9 @@ Run continuously in the current console:
 .\uninstall.ps1
 ```
 
-This stops the watcher, removes the login startup entry, clears the topmost flag
-from the currently detected Stream Deck window, and deletes local state under:
+This stops the watcher, removes the login startup entry, clears the owner/topmost
+state from the currently detected Stream Deck window, and deletes local state
+under:
 
 ```text
 %LOCALAPPDATA%\EdgeDeckPin

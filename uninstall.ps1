@@ -1,7 +1,3 @@
-param(
-    [switch] $KeepState
-)
-
 $ErrorActionPreference = "Stop"
 
 $appName = "EdgeDeckPin"
@@ -33,9 +29,8 @@ Stop-EdgeDeckWatcher -Path $pidFile
 & (Join-Path $PSScriptRoot "EdgeDeckPin.ps1") -ClearTopmost
 
 Remove-ItemProperty -Path $runKey -Name $appName -ErrorAction SilentlyContinue
-Remove-ItemProperty -Path $runKey -Name "VsdEdgeDock" -ErrorAction SilentlyContinue
 
-if (-not $KeepState -and (Test-Path $stateDir)) {
+if (Test-Path $stateDir) {
     Remove-Item -LiteralPath $stateDir -Recurse -Force
 }
 

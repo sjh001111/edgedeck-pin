@@ -1,7 +1,6 @@
 param(
     [ValidateRange(100, 10000)]
-    [int] $IntervalMilliseconds = 500,
-    [switch] $NoStart
+    [int] $IntervalMilliseconds = 500
 )
 
 $ErrorActionPreference = "Stop"
@@ -39,17 +38,14 @@ if (-not (Test-Path $stateDir)) {
 
 Stop-EdgeDeckWatcher -Path $pidFile
 
-Remove-ItemProperty -Path $runKey -Name "VsdEdgeDock" -ErrorAction SilentlyContinue
 Set-ItemProperty -Path $runKey -Name $appName -Value $command
 Write-Host "Installed EdgeDeck Pin login startup entry."
 
-if (-not $NoStart) {
-    $process = Start-Process -FilePath $powershell `
-        -ArgumentList @("-NoProfile", "-ExecutionPolicy", "Bypass", "-WindowStyle", "Hidden", "-File", "`"$mainScript`"", "-Watch", "-Quiet", "-IntervalMilliseconds", "$IntervalMilliseconds") `
-        -WorkingDirectory $PSScriptRoot `
-        -WindowStyle Hidden `
-        -PassThru
+$process = Start-Process -FilePath $powershell `
+    -ArgumentList @("-NoProfile", "-ExecutionPolicy", "Bypass", "-WindowStyle", "Hidden", "-File", "`"$mainScript`"", "-Watch", "-Quiet", "-IntervalMilliseconds", "$IntervalMilliseconds") `
+    -WorkingDirectory $PSScriptRoot `
+    -WindowStyle Hidden `
+    -PassThru
 
-    Set-Content -Path $pidFile -Value $process.Id
-    Write-Host "Started EdgeDeck Pin with PID $($process.Id)."
-}
+Set-Content -Path $pidFile -Value $process.Id
+Write-Host "Started EdgeDeck Pin with PID $($process.Id)."

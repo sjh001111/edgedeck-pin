@@ -3,8 +3,6 @@ param(
     [switch] $ListWindows,
     [switch] $DryRun,
     [switch] $ClearTopmost,
-    [switch] $AnyDisplay,
-    [switch] $AllProcesses,
     [switch] $Quiet,
     [string] $TargetDisplayName,
     [int] $PreferredDisplayWidth = 2560,
@@ -131,25 +129,6 @@ function Get-EdgeDeckScreens {
     }
 }
 
-function Get-EdgeDeckVirtualDesktopScreen {
-    param([object[]] $Screens)
-
-    $minX = ($Screens.Bounds.X | Measure-Object -Minimum).Minimum
-    $minY = ($Screens.Bounds.Y | Measure-Object -Minimum).Minimum
-    $maxX = (($Screens.Bounds.X + $Screens.Bounds.Width) | Measure-Object -Maximum).Maximum
-    $maxY = (($Screens.Bounds.Y + $Screens.Bounds.Height) | Measure-Object -Maximum).Maximum
-
-    [pscustomobject]@{
-        DeviceName = "virtual-desktop"
-        Bounds = [pscustomobject]@{
-            X = $minX
-            Y = $minY
-            Width = $maxX - $minX
-            Height = $maxY - $minY
-        }
-    }
-}
-
 function Select-EdgeDeckTargetScreen {
     param([object[]] $Screens)
 
@@ -240,7 +219,7 @@ function Get-EdgeDeckWindows {
             return
         }
 
-        if (-not $AllProcesses -and $record.ProcessName -notin @("StreamDeck", "iCUE", "QtWebEngineProcess")) {
+        if ($record.ProcessName -notin @("StreamDeck", "iCUE")) {
             return
         }
 
@@ -253,7 +232,7 @@ function Get-EdgeDeckWindows {
         return $true
     }, [IntPtr]::Zero) | Out-Null
 
-    Get-Process -Name StreamDeck, iCUE, QtWebEngineProcess -ErrorAction SilentlyContinue | ForEach-Object {
+    Get-Process -Name StreamDeck, iCUE -ErrorAction SilentlyContinue | ForEach-Object {
         foreach ($thread in $_.Threads) {
             [EdgeDeckPinWin32]::EnumThreadWindows([uint32]$thread.Id, {
                 param([IntPtr] $hwnd, [IntPtr] $lParam)
@@ -387,12 +366,11 @@ function Invoke-EdgeDeckPinOnce {
     }
 
     $icueWindow = Select-EdgeDeckIcueWindow -Windows $windows -TargetScreen $targetScreen
-    $searchScreen = if ($AnyDisplay) { Get-EdgeDeckVirtualDesktopScreen -Screens $screens } else { $targetScreen }
-    $vsdWindow = Select-EdgeDeckStreamDeckWindow -Windows $windows -SearchScreen $searchScreen
+    $vsdWindow = Select-EdgeDeckStreamDeckWindow -Windows $windows -SearchScreen $targetScreen
 
     if ($null -eq $vsdWindow) {
         if (-not $Quiet) {
-            Write-Warning "No Stream Deck window found on $($searchScreen.DeviceName)."
+            Write-Warning "No Stream Deck window found on $($targetScreen.DeviceName)."
         }
         return
     }

@@ -22,7 +22,7 @@ only corrects visibility/topmost state when needed.
 - Windows
 - PowerShell 5.1 or newer
 - Elgato Stream Deck with Virtual Stream Deck enabled
-- Corsair iCUE/XENEON EDGE or another secondary display you want to target
+- Corsair iCUE/XENEON EDGE
 
 No .NET SDK, Python, Node.js, or admin rights are required.
 
@@ -84,12 +84,6 @@ Use a different preferred display resolution:
 
 ```powershell
 .\EdgeDeckPin.ps1 -Watch -PreferredDisplayWidth 1920 -PreferredDisplayHeight 480
-```
-
-Search all displays instead of only the target display:
-
-```powershell
-.\EdgeDeckPin.ps1 -Watch -AnyDisplay
 ```
 
 Change the watch interval:

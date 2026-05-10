@@ -279,7 +279,8 @@ function Select-EdgeDeckIcueWindow {
             continue
         }
 
-        $classScore = if ([string]$window.ClassName -match "ToolSaveBits|QWindow") { 1000000 } else { 0 }
+        $className = [string]$window.ClassName
+        $classScore = if ($className -match "ToolSaveBits") { 1000000 } elseif ($className -match "QWindow") { 100000 } else { 0 }
         $topmostScore = if ($window.Topmost) { 100000 } else { 0 }
 
         [pscustomobject]@{
@@ -311,7 +312,8 @@ function Select-EdgeDeckStreamDeckWindow {
 
         $visibleScore = if ($window.Visible) { 10000000 } else { 0 }
         $titleScore = if ([string]$window.Title -match "Virtual\s+Stream\s+Deck|VSD|Stream Deck") { 1000000 } else { 0 }
-        $classScore = if ([string]$window.ClassName -match "ToolSaveBits|QWindow") { 100000 } else { 0 }
+        $className = [string]$window.ClassName
+        $classScore = if ($className -match "ToolSaveBits") { 1000000 } elseif ($className -match "QWindow") { 100000 } else { 0 }
 
         [pscustomobject]@{
             Window = $window
@@ -445,7 +447,14 @@ function Invoke-EdgeDeckPinOnce {
 }
 
 do {
-    Invoke-EdgeDeckPinOnce
+    try {
+        Invoke-EdgeDeckPinOnce
+    } catch {
+        if (-not $Quiet) {
+            Write-Warning $_.Exception.Message
+        }
+    }
+
     if ($Watch) {
         Start-Sleep -Milliseconds $IntervalMilliseconds
     }

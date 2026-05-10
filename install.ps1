@@ -14,16 +14,30 @@ $mainScript = Join-Path $PSScriptRoot "EdgeDeckPin.ps1"
 $powershell = (Get-Command powershell.exe -ErrorAction Stop).Source
 $command = "`"$powershell`" -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File `"$mainScript`" -Watch -Quiet -IntervalMilliseconds $IntervalMilliseconds"
 
+function Stop-EdgeDeckWatcher {
+    param([string] $Path)
+
+    if (-not (Test-Path $Path)) {
+        return
+    }
+
+    $watcherPidText = Get-Content $Path -ErrorAction SilentlyContinue | Select-Object -First 1
+    $watcherPid = 0
+    if ([int]::TryParse([string]$watcherPidText, [ref]$watcherPid)) {
+        $process = Get-CimInstance Win32_Process -Filter "ProcessId = $watcherPid" -ErrorAction SilentlyContinue
+        if ($null -ne $process -and [string]$process.CommandLine -like "*EdgeDeckPin.ps1*") {
+            Stop-Process -Id $watcherPid -Force -ErrorAction SilentlyContinue
+        }
+    }
+
+    Remove-Item -LiteralPath $Path -ErrorAction SilentlyContinue
+}
+
 if (-not (Test-Path $stateDir)) {
     New-Item -ItemType Directory -Path $stateDir | Out-Null
 }
 
-if (Test-Path $pidFile) {
-    $oldPid = Get-Content $pidFile -ErrorAction SilentlyContinue | Select-Object -First 1
-    if ($oldPid) {
-        Stop-Process -Id ([int]$oldPid) -Force -ErrorAction SilentlyContinue
-    }
-}
+Stop-EdgeDeckWatcher -Path $pidFile
 
 Remove-ItemProperty -Path $runKey -Name "VsdEdgeDock" -ErrorAction SilentlyContinue
 Set-ItemProperty -Path $runKey -Name $appName -Value $command

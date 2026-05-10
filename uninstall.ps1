@@ -9,13 +9,26 @@ $runKey = "HKCU:\Software\Microsoft\Windows\CurrentVersion\Run"
 $stateDir = Join-Path $env:LOCALAPPDATA $appName
 $pidFile = Join-Path $stateDir "watcher.pid"
 
-if (Test-Path $pidFile) {
-    $watcherPid = Get-Content $pidFile -ErrorAction SilentlyContinue | Select-Object -First 1
-    if ($watcherPid) {
-        Stop-Process -Id ([int]$watcherPid) -Force -ErrorAction SilentlyContinue
+function Stop-EdgeDeckWatcher {
+    param([string] $Path)
+
+    if (-not (Test-Path $Path)) {
+        return
     }
-    Remove-Item -LiteralPath $pidFile -ErrorAction SilentlyContinue
+
+    $watcherPidText = Get-Content $Path -ErrorAction SilentlyContinue | Select-Object -First 1
+    $watcherPid = 0
+    if ([int]::TryParse([string]$watcherPidText, [ref]$watcherPid)) {
+        $process = Get-CimInstance Win32_Process -Filter "ProcessId = $watcherPid" -ErrorAction SilentlyContinue
+        if ($null -ne $process -and [string]$process.CommandLine -like "*EdgeDeckPin.ps1*") {
+            Stop-Process -Id $watcherPid -Force -ErrorAction SilentlyContinue
+        }
+    }
+
+    Remove-Item -LiteralPath $Path -ErrorAction SilentlyContinue
 }
+
+Stop-EdgeDeckWatcher -Path $pidFile
 
 & (Join-Path $PSScriptRoot "EdgeDeckPin.ps1") -ClearTopmost
 
